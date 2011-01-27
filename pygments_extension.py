@@ -6,6 +6,22 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import guess_lexer, get_lexer_by_name
 
 class PygmentsExtension(Extension):
+    """
+    A Pygments extension for use with the Jinja2 template language.
+    
+    Setup:
+    
+    import PygmentsExtension
+    from jinja2 import Environment
+    
+    jinja2_env = Environment(extensions=[PygmentsExtension])
+    
+    Usage:
+    
+    {% code 'javascript' %}
+    function foo() { console.log('bar'); }
+    {% endcode %}
+    """
     tags = set(['code'])
     
     def __init__(self, environment):
