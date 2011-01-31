@@ -29,7 +29,7 @@ class PygmentsExtension(Extension):
         
         # add the defaults to the environment
         environment.extend(
-            pygments=None
+            pygments=self
         )
     
     def parse(self, parser):
