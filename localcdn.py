@@ -5,8 +5,7 @@ This script dynamically combines js and css bundles, and provides a webserver fo
 development. For static builds it combines and compresses the bundles, creating a deploy directory
 suitable for creating a tarball and placing on a CDN origin server.
 
-For compression it depends on the yuicompressor jar, which is expected to be in the same directory
-as the script.
+For compression it depends on yuicompressor, which the script will fetch if needed.
 
 Usage:
 
@@ -81,6 +80,13 @@ import subprocess
 import BaseHTTPServer
 
 conf = {}
+yuicompressor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'yuicompressor.jar')
+
+def get_yuicompressor():
+    subprocess.call(['wget','http://yui.zenfs.com/releases/yuicompressor/yuicompressor-2.4.6.zip'])
+    subprocess.call(['unzip','yuicompressor-2.4.6.zip'])
+    subprocess.call(['mv','yuicompressor-2.4.6/build/yuicompressor-2.4.6.jar', yuicompressor_path])
+    subprocess.call(['rm','-rf','yuicompressor-2.4.6','yuicompressor-2.4.6.zip'])
 
 def parse_conf(confpath):
     '''Loads the json conf from disk and converts relative paths to absolute paths'''
@@ -114,7 +120,7 @@ def get_bundle(asset_type, bundle_name):
 def compress_content(content_type, content):
     '''Compresses a js or css string and returns the compressed version'''
     
-    command = '%s --type=%s' % ('java -jar yuicompressor-2.4.6.jar', content_type)
+    command = 'java -jar %s --type=%s' % (yuicompressor_path, content_type)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     p.stdin.write(content)
     p.stdin.close()
@@ -190,11 +196,9 @@ def start_server(port):
 class DynamicAssetHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     
     def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
+        self.do_GET(True)
     
-    def do_GET(self):
+    def do_GET(self, headers_only=False):
         content_type = mimetypes.guess_type(self.path)[0] or 'text/plain'
         content = ''
         
@@ -211,6 +215,9 @@ class DynamicAssetHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", len(content))
         self.end_headers()
+        
+        if headers_only:
+            return
         
         self.wfile.write(content)
     
@@ -239,6 +246,9 @@ if __name__ == '__main__':
     if command == 'serve':
         start_server(port)
     elif command == 'deploy':
+        if not os.path.exists(yuicompressor_path):
+            get_yuicompressor()
+        
         deploy()
     else:
         help()
