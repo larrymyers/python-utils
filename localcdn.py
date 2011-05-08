@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 
 '''
-This script dynamically combines js and css bundles, and provides a webserver for live dev mode
+This script dynamically combines js and css assets, and provides a webserver for live dev mode
 development. For static builds it combines and compresses the bundles, creating a deploy directory
 suitable for creating a tarball and placing on a CDN origin server.
 
-For compression it depends on yuicompressor, which the script will fetch if needed.
+For compression it depends on the yuicompressor, which the script will fetch if needed.
 
-To do run the dev server and generate the bundles dynamically:
+To run the dev server and generate the bundles dynamically:
 
 ./localcdn.py -c localcdn.conf
 
@@ -53,14 +53,14 @@ cdn/
     images/
         foo.png
     
-Which in 'serve' mode would be accessible with these URLs:
+Which is accessible via these URLs:
 
 http://localhost:3000/js/deps.js
 http://localhost:3000/js/appbundle.js
 http://localhost:3000/css/main.css
 http://localhost:3000/images/foo.png
 
-And generate this directory structure in 'deploy' mode:
+And generates this directory structure in 'deploy' mode:
 
 cdn-deploy/
     js/
