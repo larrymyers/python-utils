@@ -7,10 +7,13 @@ suitable for creating a tarball and placing on a CDN origin server.
 
 For compression it depends on yuicompressor, which the script will fetch if needed.
 
-Usage:
+To do run the dev server and generate the bundles dynamically:
 
-./localcdn.py serve localcdn.conf
-./localcdn.py deploy localcdn.conf
+./localcdn.py -c localcdn.conf
+
+To generate the deploy folder, suitable for placing on a CDN origin server:
+
+./localcdn.py -c localcdn.conf -g
 
 Config File Format:
 
@@ -73,11 +76,13 @@ import os
 import sys
 import time
 import json
-from shutil import copy2
-from fnmatch import fnmatch
 import mimetypes
 import subprocess
 import BaseHTTPServer
+
+from shutil import copy2
+from fnmatch import fnmatch
+from optparse import OptionParser
 
 conf = {}
 yuicompressor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'yuicompressor.jar')
@@ -87,6 +92,7 @@ def get_yuicompressor():
     subprocess.call(['unzip','yuicompressor-2.4.6.zip'])
     subprocess.call(['mv','yuicompressor-2.4.6/build/yuicompressor-2.4.6.jar', yuicompressor_path])
     subprocess.call(['rm','-rf','yuicompressor-2.4.6','yuicompressor-2.4.6.zip'])
+
 
 def parse_conf(confpath):
     '''Loads the json conf from disk and converts relative paths to absolute paths'''
@@ -101,24 +107,56 @@ def parse_conf(confpath):
     conf['deployDir'] = os.path.join(root, conf['deployDir'])
 
 
-def is_bundle(asset_type, bundle_name):
-    '''Returns true if the filename represents a bundle'''
+def is_bundle(path):
+    '''Returns true if the url path represents a bundle'''
+    
+    parts = path.split('/')
+    
+    if len(parts) < 3:
+        return False
+    
+    asset_type = parts[1]
+    bundle_name = parts[2]
     
     return asset_type in conf and bundle_name in conf[asset_type]
+
+
+def get_static(path):
+    '''Attempts to serve the file from the config srcDir that matches the url path'''
+    
+    code = 404
+    content_type = 'text/plain'
+    content = 'File Not Found'
+    
+    filepath = conf['srcDir'] + path
+    
+    if os.path.isfile(filepath):
+        code = 200
+        content_type = mimetypes.guess_type(filepath)[0] or 'text/plain'
+        content = open(filepath).read()
+    
+    return code, content_type, content
 
 
 def get_bundle(asset_type, bundle_name):
     '''Combines all the resources that represents a bundle and returns them as a single string'''
     
+    content_type = 'application/javascript'
     content = []
+    
+    if asset_type == 'css':
+        content_type = 'text/css'
     
     for asset in conf[asset_type][bundle_name]:
         content.append(open(os.path.join(conf['srcDir'], asset_type, asset)).read())
     
-    return ''.join(content)
+    content = ''.join(content)
+    
+    return 200, content_type, content
+
 
 def compress_content(content_type, content):
-    '''Compresses a js or css string and returns the compressed version'''
+    '''Compresses a js or css string and returns the compressed string'''
     
     command = 'java -jar %s --type=%s' % (yuicompressor_path, content_type)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -156,10 +194,11 @@ def deploy():
     
     # generate all the bundles and write them to the deploy dir
     for asset_type in ['js','css']:
-        for bundle in conf[asset_type].iterkeys():
-            compressed = compress_content(asset_type, get_bundle(asset_type, bundle))
+        for bundle_name in conf[asset_type].iterkeys():
+            code, content_type, content = get_bundle(asset_type, bundle_name)
+            compressed = compress_content(asset_type, content)
             
-            f = open(os.path.join(deploydir, asset_type, bundle), 'w')
+            f = open(os.path.join(deploydir, asset_type, bundle_name), 'w')
             f.write(compressed)
             f.close()
         
@@ -177,6 +216,7 @@ def deploy():
                 continue
             
             copy2(os.path.join(root, f), os.path.join(deploydir + relpath, f))
+        
     
 
 
@@ -199,19 +239,16 @@ class DynamicAssetHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         self.do_GET(True)
     
     def do_GET(self, headers_only=False):
-        content_type = mimetypes.guess_type(self.path)[0] or 'text/plain'
-        content = ''
-        
-        parts = self.path.split('/')
-        asset_type = parts[1]
-        bundle_name = parts[2]
-        
-        if is_bundle(asset_type, bundle_name):
-            content = get_bundle(asset_type, bundle_name)
+        if is_bundle(self.path):
+            parts = self.path.split('/')
+            asset_type = parts[1]
+            bundle_name = parts[2]
+            
+            code, content_type, content = get_bundle(asset_type, bundle_name)
         else:
-            content = open(conf['srcDir'] + self.path).read()
+            code, content_type, content = get_static(self.path)
         
-        self.send_response(200)
+        self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", len(content))
         self.end_headers()
@@ -223,34 +260,27 @@ class DynamicAssetHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     
 
 
-def help():
-    print 'Usage: python localcdn <serve|deploy> <config-file> [port]'
-
+parser = OptionParser("localcdn.py -c CONFIG_FILE [options]")
+parser.add_option('-p', '--port', dest='port', type='int', default=3000, help='the port to run the dev server on [defaults to 3000]')
+parser.add_option('-c', '--config', dest='config_file', help='the config file path that defines the js/css bundles [required]')
+parser.add_option('-g', '--generate', action='store_true', dest='generate', help='generate the deploy package to place on a CDN')
+parser.add_option('--minify', action='store_true', dest='minify', help='have the dev server minify the bundles, by default bundles are served unminified')
+parser.add_option('--no-minify', action='store_false', dest='no_minify', help="don't minify the bundles when generating the deploy folder, by default bundles are minified")
 
 if __name__ == '__main__':
-    args = sys.argv
+    (options, args) = parser.parse_args()
     
-    if len(args) < 3:
-        help()
-        sys.exit()
+    if not options.config_file:
+        parser.error('No config file specified.')
     
-    command = args[1].lower()
-    confpath = args[2]
-    port = 3000
+    parse_conf(options.config_file)
     
-    if len(args) > 3:
-        port = int(args[3])
-    
-    parse_conf(confpath)
-    
-    if command == 'serve':
-        start_server(port)
-    elif command == 'deploy':
+    if options.generate:
         if not os.path.exists(yuicompressor_path):
             get_yuicompressor()
         
         deploy()
     else:
-        help()
+        start_server(options.port)
     
 
