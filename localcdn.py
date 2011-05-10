@@ -108,7 +108,7 @@ def parse_conf(confpath):
 
 
 def is_bundle(path):
-    '''Returns true if the url path represents a bundle'''
+    '''Returns True if the url path represents a bundle'''
     
     parts = path.split('/')
     
@@ -120,6 +120,20 @@ def is_bundle(path):
     
     return asset_type in conf and bundle_name in conf[asset_type]
 
+def is_bundle_file(path):
+    '''Returns True if the file path, expected to be relative to the srcDir, is part of a bundle'''
+    
+    if path[0] == '/':
+        path = path[1:]
+    
+    # walk the config, checking for a match
+    for asset_type in ['js','css']:
+        for bundle_name in conf[asset_type].iterkeys():
+            for f in conf[asset_type][bundle_name]:
+                if os.path.join(asset_type, f) == path:
+                    return True
+    
+    return False
 
 def get_static(path):
     '''Attempts to serve the file from the config srcDir that matches the url path'''
@@ -207,13 +221,18 @@ def deploy():
     for (root, dirs, files) in os.walk(srcdir):        
         relpath = root[len(srcdir):]
         
-        if not os.path.isdir(deploydir + relpath):
-            os.makedirs(deploydir + relpath)
-        
         for f in files:
             # skip the localcdn files, just copy actual static assets
             if fnmatch(f, 'localcdn.py') or fnmatch(f, 'yuicompressor*.jar') or fnmatch(f, '*.conf'):
                 continue
+            
+            # skip files that are part of a static asset bundle
+            if is_bundle_file(os.path.join(relpath, f)):
+                continue
+            
+            # make an intermediate dirs needed before the copy
+            if not os.path.isdir(deploydir + relpath):
+                os.makedirs(deploydir + relpath)
             
             copy2(os.path.join(root, f), os.path.join(deploydir + relpath, f))
         
