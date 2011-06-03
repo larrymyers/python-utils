@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-'''
+"""
 This script dynamically combines js and css assets, and provides a webserver for live dev mode
 development. For static builds it combines and compresses the bundles, creating a deploy directory
 suitable for creating a tarball and placing on a CDN origin server.
@@ -14,6 +14,10 @@ To run the dev server and generate the bundles dynamically:
 To generate the deploy folder, suitable for placing on a CDN origin server:
 
 ./localcdn.py -c localcdn.conf -g
+
+Embedding as WSGI Middleware:
+
+
 
 Config File Format:
 
@@ -70,21 +74,20 @@ cdn-deploy/
         main.css
     images/
         foo.png
-'''
+"""
 
 import os
 import sys
-import time
 import json
 import mimetypes
 import subprocess
-import BaseHTTPServer
+
+from wsgiref.simple_server import make_server
 
 from shutil import copy2
 from fnmatch import fnmatch
 from optparse import OptionParser
 
-conf = {}
 yuicompressor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),'yuicompressor.jar')
 
 def get_yuicompressor():
@@ -95,20 +98,30 @@ def get_yuicompressor():
 
 
 def parse_conf(confpath):
-    '''Loads the json conf from disk and converts relative paths to absolute paths'''
+    """
+    Loads the json conf from the given path, and converts relative paths to absolute paths
+    for the srcDir and deployDir values.
+    """
+    
+    if isinstance(confpath, dict):
+        return confpath
     
     fullpath = os.path.abspath(confpath)
     root = os.path.dirname(fullpath)
     
-    global conf
-    
     conf = json.loads(open(fullpath).read())
     conf['srcDir'] = os.path.join(root, conf['srcDir'])
     conf['deployDir'] = os.path.join(root, conf['deployDir'])
+    
+    return conf
 
-
-def is_bundle(path):
-    '''Returns True if the url path represents a bundle'''
+def is_bundle(conf, path):
+    """
+    Returns True if the url path represents a bundle in the given conf.
+    
+    
+    
+    """
     
     parts = path.split('/')
     
@@ -120,8 +133,8 @@ def is_bundle(path):
     
     return asset_type in conf and bundle_name in conf[asset_type]
 
-def is_bundle_file(path):
-    '''Returns True if the file path, expected to be relative to the srcDir, is part of a bundle'''
+def is_bundle_file(conf, path):
+    """Returns True if the file path, expected to be relative to the srcDir, is part of a bundle"""
     
     if path[0] == '/':
         path = path[1:]
@@ -135,25 +148,8 @@ def is_bundle_file(path):
     
     return False
 
-def get_static(path):
-    '''Attempts to serve the file from the config srcDir that matches the url path'''
-    
-    code = 404
-    content_type = 'text/plain'
-    content = 'File Not Found'
-    
-    filepath = conf['srcDir'] + path
-    
-    if os.path.isfile(filepath):
-        code = 200
-        content_type = mimetypes.guess_type(filepath)[0] or 'text/plain'
-        content = open(filepath).read()
-    
-    return code, content_type, content
-
-
-def get_bundle(asset_type, bundle_name):
-    '''Combines all the resources that represents a bundle and returns them as a single string'''
+def get_bundle(conf, asset_type, bundle_name):
+    """Combines all the resources that represents a bundle and returns them as a single string"""
     
     content_type = 'application/javascript'
     content = []
@@ -166,11 +162,11 @@ def get_bundle(asset_type, bundle_name):
     
     content = ''.join(content)
     
-    return 200, content_type, content
+    return '200 OK', content_type, content
 
 
 def compress_content(content_type, content):
-    '''Compresses a js or css string and returns the compressed string'''
+    """Compresses a js or css string and returns the compressed string"""
     
     command = 'java -jar %s --type=%s' % (yuicompressor_path, content_type)
     p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -191,7 +187,7 @@ def compress_content(content_type, content):
     return compressed
 
 
-def deploy():
+def deploy(conf):
     srcdir = conf['srcDir']
     deploydir = conf['deployDir']
     jsdir = os.path.join(conf['deployDir'], 'js')
@@ -209,7 +205,7 @@ def deploy():
     # generate all the bundles and write them to the deploy dir
     for asset_type in ['js','css']:
         for bundle_name in conf[asset_type].iterkeys():
-            code, content_type, content = get_bundle(asset_type, bundle_name)
+            code, content_type, content = get_bundle(conf, asset_type, bundle_name)
             compressed = compress_content(asset_type, content)
             
             f = open(os.path.join(deploydir, asset_type, bundle_name), 'w')
@@ -227,7 +223,7 @@ def deploy():
                 continue
             
             # skip files that are part of a static asset bundle
-            if is_bundle_file(os.path.join(relpath, f)):
+            if is_bundle_file(conf, os.path.join(relpath, f)):
                 continue
             
             # make an intermediate dirs needed before the copy
@@ -235,47 +231,63 @@ def deploy():
                 os.makedirs(deploydir + relpath)
             
             copy2(os.path.join(root, f), os.path.join(deploydir + relpath, f))
+
+
+def start_server(conf, port):
+    static_app = StaticAssetMiddleware(conf)
+    httpd = make_server('', port, DynamicAssetMiddleware(conf, static_app))
+    
+    print "Server started - http://%s:%s/" % ('localhost', port)
+    
+    httpd.serve_forever()
+
+
+class DynamicAssetMiddleware:
+    def __init__(self, config, app=None):
+        self.config = parse_conf(config)
+        self.app = app
+    
+    def __call__(self, environ, start_response):
         
-    
-
-
-def start_server(port):
-    httpd = BaseHTTPServer.HTTPServer(('', port), DynamicAssetHandler)
-    
-    print time.asctime(), "Server started - http://%s:%s/" % ('localhost', port)
-    
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    
-    httpd.server_close()
-
-
-class DynamicAssetHandler(BaseHTTPServer.BaseHTTPRequestHandler):
-    
-    def do_HEAD(self):
-        self.do_GET(True)
-    
-    def do_GET(self, headers_only=False):
-        if is_bundle(self.path):
-            parts = self.path.split('/')
+        if is_bundle(self.config, environ['PATH_INFO']):
+            parts = environ['PATH_INFO'].split('/') # ex: /js/foo.js
             asset_type = parts[1]
             bundle_name = parts[2]
             
-            code, content_type, content = get_bundle(asset_type, bundle_name)
-        else:
-            code, content_type, content = get_static(self.path)
+            code, content_type, content = get_bundle(self.config, asset_type, bundle_name)
+            
+            start_response(code, [('Content-Type', content_type), ('Content-Length', str(len(content)))])
+            
+            return [content]
         
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", len(content))
-        self.end_headers()
+        if not self.app:
+            start_response('404 Not Found', [('Content-Type', 'text/plain')])
+            
+            return ["Does not exist: %s" % environ['PATH_INFO']]
         
-        if headers_only:
-            return
+        # if a wsgi middleware app was provided, delegate handling the request to it
+        return self.app(environ, start_response)
+
+
+class StaticAssetMiddleware:
+    def __init__(self, config):
+        self.config = parse_conf(config)
+    
+    def __call__(self, environ, start_response):
+        code = '404 Not Found'
+        content_type = 'text/plain'
+        content = 'File Not Found'
         
-        self.wfile.write(content)
+        filepath = self.config['srcDir'] + environ['PATH_INFO']
+        
+        if os.path.isfile(filepath):
+            code = '200 OK'
+            content_type = mimetypes.guess_type(filepath)[0] or 'text/plain'
+            content = open(filepath).read()
+         
+        start_response(code, [('Content-Type', content_type)])
+        
+        return [content]
     
 
 
@@ -292,14 +304,14 @@ if __name__ == '__main__':
     if not options.config_file:
         parser.error('No config file specified.')
     
-    parse_conf(options.config_file)
+    conf = parse_conf(options.config_file)
     
     if options.generate:
         if not os.path.exists(yuicompressor_path):
             get_yuicompressor()
         
-        deploy()
+        deploy(conf)
     else:
-        start_server(options.port)
+        start_server(conf, options.port)
     
 
