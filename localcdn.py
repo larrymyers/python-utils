@@ -1,6 +1,13 @@
 #!/usr/bin/env python
 
 """
+# Local CDN
+
+Copyright (c) 2011 Larry Myers <larry@larrymyers.com>
+Licensed under the [MIT License](http://www.opensource.org/licenses/mit-license.php)
+
+## Usage
+
 This script dynamically combines js and css assets, and provides a webserver for live dev mode
 development. For static builds it combines and compresses the bundles, creating a deploy directory
 suitable for creating a tarball and placing on a CDN origin server.
@@ -9,17 +16,17 @@ For compression it depends on the yuicompressor, which the script will fetch if 
 
 To run the dev server and generate the bundles dynamically:
 
-./localcdn.py -c localcdn.conf
+    ./localcdn.py -c localcdn.conf
 
 To generate the deploy folder, suitable for placing on a CDN origin server:
 
-./localcdn.py -c localcdn.conf -g
+    ./localcdn.py -c localcdn.conf -g
 
-Embedding as WSGI Middleware:
+## Embed as WSGI Middleware
 
 
 
-Config File Format:
+## Config File Format:
 
 {
     "srcDir": ".",
