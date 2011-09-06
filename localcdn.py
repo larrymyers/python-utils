@@ -191,7 +191,7 @@ def compress_content(content_type, content):
             err = 'Unable to use YUI Compressor'
         
     
-    return compressed
+    return err, compressed
 
 
 def deploy(conf):
@@ -213,7 +213,11 @@ def deploy(conf):
     for asset_type in ['js','css']:
         for bundle_name in conf[asset_type].iterkeys():
             code, content_type, content = get_bundle(conf, asset_type, bundle_name)
-            compressed = compress_content(asset_type, content)
+            err, compressed = compress_content(asset_type, content)
+
+            if len(err) > 0:
+                print 'Error generating: %s' % bundle_name
+                print err
             
             f = open(os.path.join(deploydir, asset_type, bundle_name), 'w')
             f.write(compressed)
