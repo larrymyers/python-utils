@@ -33,7 +33,7 @@ class PygmentsExtension(Extension):
         )
     
     def parse(self, parser):
-        lineno = parser.stream.next().lineno
+        lineno = next(parser.stream).lineno
         
         args = []
         lang_type = parser.parse_expression()
